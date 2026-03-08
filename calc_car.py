@@ -3,6 +3,7 @@
 批处理2（与批处理1 merge_data.py 分开）：按《算法概要》2.2 节，
 在一览文件基础上按「主队、客队、时间点」分组，对 D～L 列计算综合评估值：
 D～I 列用 (MAX-MIN)/AVERAGE，J、K、L 列用 VARP(列)*100。输出 CAR{YYYYMMDD}.xlsx。
+详细日志写入 logs/calc_car{YYYYMMDDHH}.log。
 依赖：需先对同一目录执行批处理1（merge_data.py）生成一览 CSV。
 
 用法: python calc_car.py [目录1] [目录2 ...]
@@ -13,12 +14,14 @@ D～I 列用 (MAX-MIN)/AVERAGE，J、K、L 列用 VARP(列)*100。输出 CAR{YYY
      python calc_car.py 20260306 20260307 20260308
 """
 import datetime
+import logging
 import os
 import sys
 
 import pandas as pd
 
-from config import DOWNLOAD_DIR, REPORT_DIR
+from config import DOWNLOAD_DIR, REPORT_DIR, DEBUG_LOG_DIR, LOG_RETENTION_DAYS
+from log_cleanup import delete_old_logs
 
 # 与 merge_data 一致：一览表 12 列，A/B/C=主队/客队/时间点，D～L=数据列（索引 3～11）
 NUM_COLUMNS = 12
@@ -28,6 +31,27 @@ COL_VALUE_END = 11    # L 列（含）
 # D～I 列（索引 3～8）用 (MAX-MIN)/AVERAGE；J、K、L 列（索引 9～11）用 VARP*100
 COL_RANGE_MAX_MIN_AVG = (3, 8)   # D～I
 COL_RANGE_VARP = (9, 11)         # J～L
+
+
+def _setup_logging():
+    """配置详细日志到独立文件：calc_car{YYYYMMDDHH}.log。"""
+    os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+    time_suffix = datetime.datetime.now().strftime("%Y%m%d%H")
+    log_path = os.path.join(DEBUG_LOG_DIR, f"calc_car.py{time_suffix}.log")
+    logger = logging.getLogger("calc_car")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+    logger.info("日志文件: %s", log_path)
+    return logger
 
 
 def _to_numeric(series: pd.Series) -> pd.Series:
@@ -121,7 +145,7 @@ def run(data_dir: str, project_dir: str) -> None:
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         header_df.to_excel(writer, sheet_name="Sheet1", index=False, header=False)
         data_df.to_excel(writer, sheet_name="Sheet1", index=False, header=False, startrow=len(header_df))
-    print(f"已按 2.2 节计算，共 {len(results)} 组 -> {out_path}")
+    logging.getLogger("calc_car").info("已按 2.2 节计算，共 %d 组 -> %s", len(results), out_path)
 
 
 def _resolve_data_dir(raw_arg: str) -> str:
@@ -133,6 +157,10 @@ def _resolve_data_dir(raw_arg: str) -> str:
 
 
 def main():
+    log = _setup_logging()
+    removed = delete_old_logs(DEBUG_LOG_DIR, days=LOG_RETENTION_DAYS)
+    if removed:
+        log.info("已删除 %d 个超过 %d 天的日志文件: %s", len(removed), LOG_RETENTION_DAYS, removed)
     # 未传参数时默认为当天 YYYYMMDD
     if len(sys.argv) < 2:
         dirs = [datetime.date.today().strftime("%Y%m%d")]
@@ -141,23 +169,25 @@ def main():
 
     project_dir = os.path.dirname(os.path.abspath(__file__))
     if not dirs:
-        print("错误: 请至少指定一个数据目录")
+        log.error("请至少指定一个数据目录")
         sys.exit(1)
 
+    log.info("待处理目录: %s", dirs)
     failed = 0
     for raw_arg in dirs:
         data_dir = _resolve_data_dir(raw_arg)
         if not os.path.isdir(data_dir):
-            print(f"错误: 目录不存在: {data_dir}")
+            log.error("目录不存在: %s", data_dir)
             failed += 1
             continue
         try:
+            log.info("处理目录: %s", data_dir)
             run(data_dir, project_dir)
         except FileNotFoundError as e:
-            print(f"错误 [{data_dir}]: {e}")
+            log.error("[%s] %s", data_dir, e)
             failed += 1
         except ValueError as e:
-            print(f"错误 [{data_dir}]: {e}")
+            log.error("[%s] %s", data_dir, e)
             failed += 1
     if failed:
         sys.exit(1)

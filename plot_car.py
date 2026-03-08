@@ -2,6 +2,7 @@
 """
 批处理3：根据综合评估表（CAR{YYYYMMDD}.xlsx）生成欧赔指数曲线图和凯利指数曲线图。
 参见 design.md 第 3.3 节。
+详细日志写入 logs/plot_car{YYYYMMDDHH}.log。
 
 曲线节点数量由综合评估表中该场比赛的时间点数量决定，不固定。
 
@@ -14,10 +15,11 @@
   相对路径相对于 config.DOWNLOAD_DIR 解析，绝对路径则直接使用。可传多个目录。
   输出图片保存在对应数据目录下，文件名：{主队}_VS_{客队}_曲线.png
 """
+import datetime
+import logging
 import os
 import re
 import sys
-import datetime
 
 import pandas as pd
 import matplotlib
@@ -25,7 +27,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 
-from config import DOWNLOAD_DIR, REPORT_DIR
+from config import DOWNLOAD_DIR, REPORT_DIR, DEBUG_LOG_DIR, LOG_RETENTION_DAYS
+from log_cleanup import delete_old_logs
 
 # 综合评估表列：A=主队(0), B=客队(1), C=时间点(2), D～L=数据(3～11)
 # 欧赔：初指 D/E/F(3,4,5)，即时 G/H/I(6,7,8)；凯利 J/K/L(9,10,11)
@@ -35,6 +38,27 @@ COL_LIVE_MAIN, COL_LIVE_DRAW, COL_LIVE_AWAY = 6, 7, 8   # 即时 主/平/客
 COL_KELLY_MAIN, COL_KELLY_DRAW, COL_KELLY_AWAY = 9, 10, 11
 CAR_HEADER_ROWS = 2
 NUM_COLUMNS = 12
+
+
+def _setup_logging():
+    """配置详细日志到独立文件：plot_car{YYYYMMDDHH}.log。"""
+    os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+    time_suffix = datetime.datetime.now().strftime("%Y%m%d%H")
+    log_path = os.path.join(DEBUG_LOG_DIR, f"plot_car.py{time_suffix}.log")
+    logger = logging.getLogger("plot_car")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+    logger.info("日志文件: %s", log_path)
+    return logger
 
 
 def _safe_filename(name: str) -> str:
@@ -82,9 +106,10 @@ def plot_match_curves(data_dir: str, project_dir: str) -> int:
     if not os.path.isfile(car_path):
         raise FileNotFoundError(f"综合评估表不存在，请先执行 calc_car.py: {car_path}")
 
+    log = logging.getLogger("plot_car")
     df = pd.read_excel(car_path, header=None, engine="openpyxl")
     if len(df) <= CAR_HEADER_ROWS:
-        print(f"  [{folder_name}] 综合评估表无数据行，跳过")
+        log.info("  [%s] 综合评估表无数据行，跳过", folder_name)
         return 0
     data = df.iloc[CAR_HEADER_ROWS:].copy()
     if data.shape[1] < NUM_COLUMNS:
@@ -149,7 +174,7 @@ def plot_match_curves(data_dir: str, project_dir: str) -> int:
         out_path = os.path.join(report_dir, safe_name)
         plt.savefig(out_path, dpi=120, bbox_inches="tight")
         plt.close()
-        print(f"  已生成: {out_path}")
+        log.info("  已生成: %s", out_path)
         count += 1
 
     return count
@@ -164,6 +189,10 @@ def _resolve_data_dir(raw_arg: str) -> str:
 
 
 def main():
+    log = _setup_logging()
+    removed = delete_old_logs(DEBUG_LOG_DIR, days=LOG_RETENTION_DAYS)
+    if removed:
+        log.info("已删除 %d 个超过 %d 天的日志文件: %s", len(removed), LOG_RETENTION_DAYS, removed)
     _setup_chinese_font()
     if len(sys.argv) < 2:
         dirs = [datetime.date.today().strftime("%Y%m%d")]
@@ -172,28 +201,30 @@ def main():
 
     project_dir = os.path.dirname(os.path.abspath(__file__))
     if not dirs:
-        print("错误: 请至少指定一个数据目录")
+        log.error("请至少指定一个数据目录")
         sys.exit(1)
 
+    log.info("待处理目录: %s", dirs)
     total = 0
     failed = 0
     for raw_arg in dirs:
         data_dir = _resolve_data_dir(raw_arg)
         if not os.path.isdir(data_dir):
-            print(f"错误: 目录不存在: {data_dir}")
+            log.error("目录不存在: %s", data_dir)
             failed += 1
             continue
         try:
+            log.info("处理目录: %s", data_dir)
             n = plot_match_curves(data_dir, project_dir)
             total += n
         except FileNotFoundError as e:
-            print(f"错误 [{data_dir}]: {e}")
+            log.error("[%s] %s", data_dir, e)
             failed += 1
         except ValueError as e:
-            print(f"错误 [{data_dir}]: {e}")
+            log.error("[%s] %s", data_dir, e)
             failed += 1
     if total:
-        print(f"共生成 {total} 张曲线图。")
+        log.info("共生成 %d 张曲线图。", total)
     if failed:
         sys.exit(1)
 

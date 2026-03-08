@@ -2,6 +2,7 @@
 """
 批处理1（与批处理2 calc_car.py 分开）：将指定目录下的所有 .xls 数据文件
 按文件名排序后合并为一个一览表，输出文件名为 Master{YYYYMMDD}.csv。
+详细日志写入 logs/merge_data{YYYYMMDDHH}.log。
 用法: python merge_data.py [数据目录或相对子目录]
   - 不传参数时默认为当天日期 YYYYMMDD（如 20260308）
   - 相对路径会相对于 config.DOWNLOAD_DIR 解析，绝对路径则直接使用
@@ -12,6 +13,7 @@
 import csv
 import datetime
 import io
+import logging
 import os
 import re
 import sys
@@ -20,7 +22,8 @@ import unicodedata
 
 import pandas as pd
 
-from config import DOWNLOAD_DIR
+from config import DOWNLOAD_DIR, DEBUG_LOG_DIR, LOG_RETENTION_DAYS
+from log_cleanup import delete_old_logs
 
 
 # 一览表列数（主队、客队、时间点 + 数据列 C/D/E/F/G/H/L/M/N）
@@ -36,6 +39,27 @@ SOURCE_COL_INDICES = [2, 3, 4, 5, 6, 7, 11, 12, 13]
 # 文件名正则：{主队} VS {客队}{YYYYMMDDHH}.xls，末尾为 10 位数字（年月日时）
 # 客队用贪婪 (.+) 以便队名含数字（如 U19、U20）时仍能正确截出末尾 10 位时间
 FILENAME_PATTERN = re.compile(r"^(.+?)\s+VS\s+(.+)(\d{10})\.xls$", re.IGNORECASE)
+
+
+def _setup_logging():
+    """配置详细日志到独立文件：merge_data{YYYYMMDDHH}.log。"""
+    os.makedirs(DEBUG_LOG_DIR, exist_ok=True)
+    time_suffix = datetime.datetime.now().strftime("%Y%m%d%H")
+    log_path = os.path.join(DEBUG_LOG_DIR, f"merge_data.py{time_suffix}.log")
+    logger = logging.getLogger("merge_data")
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    fh.setLevel(logging.DEBUG)
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.INFO)
+    ch.setFormatter(fmt)
+    logger.addHandler(ch)
+    logger.info("日志文件: %s", log_path)
+    return logger
 
 
 def parse_filename(basename: str):
@@ -144,9 +168,13 @@ def get_csv_headers(project_dir: str):
 
 
 def main():
+    log = _setup_logging()
+    removed = delete_old_logs(DEBUG_LOG_DIR, days=LOG_RETENTION_DAYS)
+    if removed:
+        log.info("已删除 %d 个超过 %d 天的日志文件: %s", len(removed), LOG_RETENTION_DAYS, removed)
     # 确认实际执行的脚本路径（若看不到“原因”等输出，请检查是否运行了其他目录下的脚本）
     _script_path = os.path.abspath(__file__)
-    print(f"[merge_data] 正在执行: {_script_path}", flush=True)
+    log.info("[merge_data] 正在执行: %s", _script_path)
 
     # 未传参数时默认为当天 YYYYMMDD
     if len(sys.argv) < 2:
@@ -158,7 +186,7 @@ def main():
     else:
         data_dir = os.path.abspath(os.path.join(DOWNLOAD_DIR, raw_arg))
     if not os.path.isdir(data_dir):
-        print(f"错误: 目录不存在: {data_dir}")
+        log.error("目录不存在: %s", data_dir)
         sys.exit(1)
 
     # 日志写到数据目录，便于在 xls 同目录下查看
@@ -177,17 +205,18 @@ def main():
         key=lambda x: x,
     )
     if not xls_files:
-        print(f"该目录下没有 .xls 文件: {data_dir}")
+        log.warning("该目录下没有 .xls 文件: %s", data_dir)
         sys.exit(0)
 
     folder_name = os.path.basename(data_dir)
     # 一览表文件名：Master{YYYYMMDD}.csv
     output_path = os.path.join(data_dir, f"Master{folder_name}.csv")
+    log.info("数据目录: %s, 待处理 .xls 数量: %d", data_dir, len(xls_files))
 
     try:
         header_row1, header_row2 = get_csv_headers(project_dir)
     except (FileNotFoundError, ValueError, RuntimeError) as e:
-        print(f"错误: {e}")
+        log.error("错误: %s", e)
         sys.exit(1)
 
     rows = []
@@ -195,19 +224,17 @@ def main():
     for fname in xls_files:
         parsed = parse_filename(fname)
         if not parsed:
-            print(f"跳过（文件名无法解析）: {fname}")
+            log.info("跳过（文件名无法解析）: %s", fname)
             continue
         home, away, time_point = parsed
         path = os.path.join(data_dir, fname)
         data_df, err_msg, tb = read_xls_data(path)
         if data_df is None:
             err = err_msg or "未知错误"
-            print(f"跳过（读取失败）: {fname}", flush=True)
-            print(f"  [原因] {err}", flush=True)
+            log.warning("跳过（读取失败）: %s", fname)
+            log.info("  [原因] %s", err)
             if tb:
-                print("  [异常日志]", flush=True)
-                for line in tb.rstrip().split("\n"):
-                    print(f"    {line}", flush=True)
+                log.debug("  [异常日志]\n%s", tb)
             # 第一个失败时写入数据目录下的日志文件（不依赖终端输出）
             if not first_fail_done:
                 first_fail_done = True
@@ -220,12 +247,12 @@ def main():
                     block += "  完整 traceback:\n"
                     block += "\n".join(f"    {line}" for line in tb.rstrip().split("\n"))
                 block += f"\n{sep}\n\n"
-                print(block, flush=True)
+                log.warning(block)
                 if error_log_path:
                     try:
                         with open(error_log_path, "a", encoding="utf-8") as f:
                             f.write(block)
-                        print(f"  错误已追加到: {error_log_path}\n", flush=True)
+                        log.info("  错误已追加到: %s", error_log_path)
                     except Exception:
                         pass
             continue
@@ -238,7 +265,7 @@ def main():
         w.writerow(header_row1)
         w.writerow(header_row2)
         w.writerows(rows)
-    print(f"已合并 {len(xls_files)} 个文件，共 {len(rows)} 行 -> {output_path}")
+    log.info("已合并 %d 个文件，共 %d 行 -> %s", len(xls_files), len(rows), output_path)
 
 
 if __name__ == "__main__":

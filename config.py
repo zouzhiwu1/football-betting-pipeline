@@ -8,6 +8,7 @@
   CRAWLER_TIMEZONE  用于“当前时间”的时区（决定下载目录/文件名），默认 Asia/Tokyo
   CRAWLER_HEADLESS  设为 1 则无头模式
   CRAWLER_DEBUG_LOG_DIR  日志目录（定时任务日志、debug_export_page_*.html 等），默认 football-betting-log
+  CRAWLER_LOG_RETENTION_DAYS  日志保留天数，超过此天数的日志文件将被删除，默认 7
 """
 import os
 
@@ -46,6 +47,8 @@ DEBUG_LOG_DIR = os.environ.get(
     "CRAWLER_DEBUG_LOG_DIR",
     os.path.join(WORK_SPACE, "football-betting-log")
 )
+# 日志保留天数：crawl/merge_data/calc_car/plot_car 执行前会删除超过此天数的日志文件
+LOG_RETENTION_DAYS = int(os.environ.get("CRAWLER_LOG_RETENTION_DAYS", "7"))
 
 # 足彩子菜单：目前只抓取「北单」
 ZUCAI_MENU_OPTIONS = ["北单"]
