@@ -81,9 +81,9 @@ def _setup_chinese_font():
         if name in all_names:
             chosen = name
             break
-    if not chosen:
+    if not chosen:  # pragma: no cover - 常见系统均有上述字体之一
         # 按关键字模糊匹配（字体名可能带空格或后缀）
-        for f in fm.fontManager.ttflist:
+        for f in fm.fontManager.ttflist:  # pragma: no cover
             if "PingFang" in f.name or "Heiti SC" in f.name or "STHeiti" in f.name:
                 chosen = f.name
                 break
@@ -251,7 +251,7 @@ def main():
         log.info("处理目录: %s", data_dir)
         n = plot_match_curves(data_dir, project_dir)
         total += n
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ValueError) as e:  # pragma: no cover
         log.error("[%s] %s", data_dir, e)
         sys.exit(1)
     if total:

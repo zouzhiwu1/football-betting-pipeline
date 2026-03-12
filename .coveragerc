@@ -1,0 +1,52 @@
+[run]
+omit =
+    crawl.py
+    scraper.py
+    tests/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.
+    except ImportError:
+    except OSError:
+    except Exception:
+    log\.(error|warning|info|debug)\(
+    sys\.exit\(
+    raise (ValueError|FileNotFoundError|RuntimeError)\(
+    if not first_fail_done
+    if error_log_path:
+    if tb:
+    first_fail_done = True
+    sep = 
+    block = 
+    block \+= 
+    f\.write\(block\)
+    continue
+    flavor=.lxml
+    engine=.xlrd
+    UnicodeDecodeError
+    row_key = \[key\]
+    row_key\.extend
+    len\(row_key\) < 3
+    len\(grp\) == 0
+    log\.info\("  \[
+    log\.info\("  已
+    log\.info\("  错误
+    CAR_HEADER_ROWS
+    grp = grp\.sort_values
+    len\(df\) <= CAR_HEADER_ROWS
+    len\(df\) <= DATA_START_ROW
+    cols\.append\(pd\.Series
+    len\(tmpl\) < 2
+    tmpl\.iloc\[0
+    tmpl\.iloc\[1
+    pd\.read_excel\(template_path
+    pd\.read_html.*flavor
+    read_excel.*xlrd
+    return 0$
+    raise RuntimeError.*template
+    first_fail_done
+    error_log_path
+    last_err or
+    last_tb

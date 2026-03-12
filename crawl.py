@@ -47,6 +47,8 @@ def create_driver():
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
+    # 静音浏览器，避免访问比分页时进球提示音干扰本机
+    options.add_argument("--mute-audio")
 
     prefs = {
         "download.default_directory": DOWNLOAD_DIR,

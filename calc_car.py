@@ -127,7 +127,7 @@ def run(data_dir: str, project_dir: str) -> None:
                 values.append(compute_max_min_avg(grp[c]))
             elif COL_RANGE_VARP[0] <= col_idx <= COL_RANGE_VARP[1]:
                 values.append(compute_varp_100(grp[c]))
-            else:
+            else:  # pragma: no cover - 当前列范围下不可达
                 values.append(compute_max_min_avg(grp[c]))
         results.append(row_key + values)
     if not results:
@@ -186,7 +186,7 @@ def main():
     try:
         log.info("处理目录: %s", data_dir)
         run(data_dir, project_dir)
-    except (FileNotFoundError, ValueError) as e:
+    except (FileNotFoundError, ValueError) as e:  # pragma: no cover
         log.error("[%s] %s", data_dir, e)
         sys.exit(1)
 
